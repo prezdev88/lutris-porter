@@ -296,6 +296,10 @@ def import_games(archive_path):
     conn = get_db_connection()
     cursor = conn.cursor()
 
+    # Obtener las columnas válidas de la base de datos actual para evitar errores por versiones distintas de Lutris
+    cursor.execute("PRAGMA table_info(games)")
+    valid_columns = [row['name'] for row in cursor.fetchall()]
+
     for game in metadata:
         name = game.get('name', 'Desconocido')
         original_dir = game.get('directory')
@@ -321,21 +325,24 @@ def import_games(archive_path):
 
         # Actualizar base de datos
         game['directory'] = new_dir
-        game_id = game.pop('id', None) 
+        game.pop('id', None)
         
-        columns = ', '.join(game.keys())
-        placeholders = ', '.join(['?'] * len(game))
+        # Filtrar solo las columnas que existan en la base de datos del PC de destino
+        filtered_game = {k: v for k, v in game.items() if k in valid_columns}
+        
+        columns = ', '.join(filtered_game.keys())
+        placeholders = ', '.join(['?'] * len(filtered_game))
         
         try:
             cursor.execute(f"SELECT id FROM games WHERE slug = ?", (slug,))
             row = cursor.fetchone()
             
             if row:
-                set_clause = ', '.join([f"{k} = ?" for k in game.keys()])
-                values = list(game.values()) + [row['id']]
+                set_clause = ', '.join([f"{k} = ?" for k in filtered_game.keys()])
+                values = list(filtered_game.values()) + [row['id']]
                 cursor.execute(f"UPDATE games SET {set_clause} WHERE id = ?", values)
             else:
-                cursor.execute(f"INSERT INTO games ({columns}) VALUES ({placeholders})", tuple(game.values()))
+                cursor.execute(f"INSERT INTO games ({columns}) VALUES ({placeholders})", tuple(filtered_game.values()))
         except sqlite3.Error as e:
             console.print(f"[bold red]Error guardando {name} en BD:[/bold red] {e}")
 
