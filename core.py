@@ -55,6 +55,20 @@ def get_installed_games(db_path=LUTRIS_DB_PATH):
     finally:
         conn.close()
 
+class ProgressFileReader:
+    def __init__(self, file_obj, pbar):
+        self.file_obj = file_obj
+        self.pbar = pbar
+
+    def read(self, size=-1):
+        chunk = self.file_obj.read(size)
+        self.pbar.update(len(chunk))
+        return chunk
+
+    def close(self):
+        self.file_obj.close()
+
+
 def export_games(selected_games, output_path):
     if not selected_games:
         console.print("[yellow]No se seleccionaron juegos para exportar.[/yellow]")
@@ -93,22 +107,28 @@ def export_games(selected_games, output_path):
                     basename = os.path.basename(directory)
                     # Añadir la estructura iterativamente para actualizar la barra de progreso
                     for dirpath, dirnames, filenames in os.walk(directory):
-                        # Agregar el directorio en sí (importante para mantener permisos de carpetas vacías)
+                        # Agregar el directorio en sí
                         rel_dir = os.path.relpath(dirpath, directory)
                         if rel_dir == ".":
                             tar.add(dirpath, arcname=f"games/{basename}", recursive=False)
                         else:
                             tar.add(dirpath, arcname=f"games/{basename}/{rel_dir}", recursive=False)
                             
-                        # Agregar los archivos
+                        # Agregar los archivos con tracking en tiempo real
                         for f in filenames:
                             fp = os.path.join(dirpath, f)
                             arcname = f"games/{basename}/{os.path.relpath(fp, directory)}"
-                            tar.add(fp, arcname=arcname, recursive=False)
                             
-                            # Actualizar la barra con el tamaño del archivo
-                            if not os.path.islink(fp):
-                                pbar.update(os.path.getsize(fp))
+                            if os.path.islink(fp):
+                                tar.add(fp, arcname=arcname, recursive=False)
+                            else:
+                                tarinfo = tar.gettarinfo(fp, arcname=arcname)
+                                if tarinfo.isreg():
+                                    with open(fp, "rb") as f_in:
+                                        wrapped_file = ProgressFileReader(f_in, pbar)
+                                        tar.addfile(tarinfo, wrapped_file)
+                                else:
+                                    tar.add(fp, arcname=arcname, recursive=False)
                 else:
                     console.print(f"\n[yellow]Advertencia:[/yellow] El directorio para {name} no existe ({directory})")
 
