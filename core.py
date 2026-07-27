@@ -62,54 +62,84 @@ def export_games(selected_games, output_path):
         console.print("[yellow]No se seleccionaron juegos para exportar.[/yellow]")
         return
         
+    console.print(f"Calculando tamaño total a exportar...")
+    total_size = 0
+    
+    # Pre-calcular el tamaño para la barra de progreso
+    for game in selected_games:
+        directory = game.get('directory')
+        if directory and os.path.exists(directory):
+            for dirpath, dirnames, filenames in os.walk(directory):
+                for f in filenames:
+                    fp = os.path.join(dirpath, f)
+                    if not os.path.islink(fp):
+                        total_size += os.path.getsize(fp)
+
     console.print(f"Preparando archivo de exportación: [bold cyan]{output_path}[/bold cyan]")
     
-    # 1. Guardar la metadata temporalmente
-    metadata_file = "games_metadata.json"
-    with open(metadata_file, "w") as f:
+    # Escribimos metadata temporalmente
+    tmp_metadata = "/tmp/lutris_games_metadata.json"
+    with open(tmp_metadata, "w") as f:
         json.dump(selected_games, f, indent=4)
         
-    # Crear el tar con la metadata primero
-    subprocess.run(["tar", "-cf", output_path, metadata_file], check=True)
-    os.remove(metadata_file)
+    total_size += os.path.getsize(tmp_metadata)
+
+    # Construimos el comando GNU Tar
+    cmd = ["tar", "-c"]
     
-    # 2. Agregar cada juego usando GNU tar nativo (infinitamente más rápido para archivos pequeños)
-    console.print("[bold yellow]Empaquetando juegos con motor nativo de Linux (GNU Tar)...[/bold yellow]")
-    console.print("Esto procesará miles de archivos pequeños a velocidad nativa.")
+    # GNU Tar remueve el slash inicial (/) por defecto, así que nuestras reglas
+    # de transformación deben coincidir con la ruta sin el slash inicial.
+    meta_path_clean = tmp_metadata.lstrip("/")
+    cmd.extend(["--transform", f"s|^{meta_path_clean}|games_metadata.json|"])
+    cmd.append(tmp_metadata)
     
     for game in selected_games:
-        name = game.get('name', 'Desconocido')
         directory = game.get('directory')
         slug = game.get('slug')
         
-        console.print(f" -> Añadiendo: [bold cyan]{name}[/bold cyan]")
-        
         if directory and os.path.exists(directory):
             basename = os.path.basename(directory)
-            # GNU tar -r (append). Transformamos la ruta interna '.' a 'games/basename'
-            # Descartamos errores menores como "socket ignored" que lanza tar
-            transform_arg = f"s,^\\.,games/{basename},"
-            subprocess.run(
-                ["tar", "--transform", transform_arg, "-rf", output_path, "-C", directory, "."],
-                stderr=subprocess.DEVNULL
-            )
+            clean_dir = os.path.abspath(directory).lstrip("/")
+            cmd.extend(["--transform", f"s|^{clean_dir}|games/{basename}|"])
+            cmd.append(os.path.abspath(directory))
         else:
-            console.print(f"[yellow]Advertencia:[/yellow] El directorio para {name} no existe ({directory})")
+            console.print(f"[yellow]Advertencia:[/yellow] El directorio para {game.get('name')} no existe ({directory})")
 
-        # Buscar archivo de configuración
         config_file = game.get('configpath') or slug
         if config_file:
             if not config_file.endswith('.yml'):
                 config_file += '.yml'
             config_path = os.path.join(LUTRIS_CONFIG_DIR, config_file)
             if os.path.exists(config_path):
-                transform_arg = f"s,^.*/,configs/,"
-                subprocess.run(
-                    ["tar", "--transform", transform_arg, "-rf", output_path, config_path],
-                    stderr=subprocess.DEVNULL
-                )
+                clean_cfg = os.path.abspath(config_path).lstrip("/")
+                cmd.extend(["--transform", f"s|^{clean_cfg}|configs/{config_file}|"])
+                cmd.append(os.path.abspath(config_path))
 
-    console.print("\n[bold green]¡Exportación completada exitosamente a velocidad nativa![/bold green]")
+    # Ejecutamos Tar y capturamos su salida en streaming
+    # Esto combina la velocidad de bajo nivel de Tar (ideal para prefijos Proton)
+    # con la capacidad de Python para mostrar una barra de progreso fluida (tqdm).
+    console.print("[bold yellow]Iniciando motor híbrido (Velocidad C + UI Python)...[/bold yellow]")
+    
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    
+    try:
+        with open(output_path, "wb") as f_out:
+            with tqdm(total=total_size, unit="B", unit_scale=True, desc="Empaquetando") as pbar:
+                while True:
+                    # Leemos en bloques gigantes (4MB) para no ahogar la tarjeta SD
+                    chunk = process.stdout.read(1024 * 1024 * 4)
+                    if not chunk:
+                        break
+                    f_out.write(chunk)
+                    pbar.update(len(chunk))
+    except Exception as e:
+        console.print(f"[bold red]Error durante la escritura:[/bold red] {e}")
+    finally:
+        process.wait()
+        if os.path.exists(tmp_metadata):
+            os.remove(tmp_metadata)
+
+    console.print("\n[bold green]¡Exportación completada exitosamente a máxima velocidad![/bold green]")
 
 def import_games(archive_path):
     if not os.path.exists(archive_path):
