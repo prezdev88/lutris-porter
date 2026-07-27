@@ -1,11 +1,26 @@
 import argparse
 import sys
+import os
 from rich.console import Console
 
 from core import get_installed_games, export_games, import_games
 import questionary
 
 console = Console()
+
+def detect_usb_drives():
+    """Busca unidades extraíbles montadas en las rutas comunes de Linux/SteamOS."""
+    drives = []
+    base_media_path = "/run/media/"
+    if os.path.exists(base_media_path):
+        for user_dir in os.listdir(base_media_path):
+            user_path = os.path.join(base_media_path, user_dir)
+            if os.path.isdir(user_path):
+                for drive in os.listdir(user_path):
+                    drive_path = os.path.join(user_path, drive)
+                    if os.path.isdir(drive_path):
+                        drives.append(drive_path)
+    return drives
 
 def run_export(output_file):
     console.print("\n[bold blue]Buscando juegos en Lutris...[/bold blue]")
@@ -48,13 +63,30 @@ def run_wizard():
         sys.exit(0)
         
     if action.startswith("Exportar"):
+        base_path = ""
+        usbs = detect_usb_drives()
+        
+        if usbs:
+            choices = [{"name": "Almacenamiento Local (Carpeta actual)", "value": ""}]
+            for u in usbs:
+                choices.append({"name": f"Pendrive / Disco Externo ({os.path.basename(u)})", "value": f"{u}/"})
+                
+            base_path = questionary.select(
+                "¡He detectado discos externos! ¿Dónde quieres guardar el respaldo?",
+                choices=choices
+            ).ask()
+            
+            if base_path is None:  # Canceló con Ctrl+C
+                return
+
         output = questionary.text(
             "¿Cómo deseas llamar al archivo de respaldo?",
             default="lutris_backup.tar"
         ).ask()
         
         if output:
-            run_export(output)
+            final_path = os.path.join(base_path, output) if base_path else output
+            run_export(final_path)
             
     elif action.startswith("Importar"):
         archive = questionary.path(
