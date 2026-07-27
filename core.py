@@ -182,7 +182,8 @@ def install_lutris():
             console.print("[bold cyan]Se requerirá tu contraseña (sudo) para usar pacman...[/bold cyan]")
             subprocess.run(["sudo", "pacman", "-S", "--noconfirm", "lutris"], check=True)
             console.print("[yellow]Inicializando base de datos de Lutris...[/yellow]")
-            subprocess.run(["lutris", "-l"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Usamos el python del sistema para evitar que falle por estar dentro de un venv
+            subprocess.run(["/usr/bin/python3", "/usr/bin/lutris", "-l"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
         elif "Flatpak" in method:
             console.print("[bold cyan]Configurando repositorio de Flathub (si no existe)...[/bold cyan]")
@@ -197,13 +198,13 @@ def install_lutris():
             subprocess.run(["sudo", "apt", "update"], check=True)
             subprocess.run(["sudo", "apt", "install", "-y", "lutris"], check=True)
             console.print("[yellow]Inicializando base de datos de Lutris...[/yellow]")
-            subprocess.run(["lutris", "-l"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["/usr/bin/python3", "/usr/bin/lutris", "-l"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
         elif "DNF" in method:
             console.print("[bold cyan]Se requerirá tu contraseña (sudo) para usar dnf...[/bold cyan]")
             subprocess.run(["sudo", "dnf", "install", "-y", "lutris"], check=True)
             console.print("[yellow]Inicializando base de datos de Lutris...[/yellow]")
-            subprocess.run(["lutris", "-l"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["/usr/bin/python3", "/usr/bin/lutris", "-l"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
         console.print("[bold green]¡Lutris se instaló y configuró exitosamente![/bold green]")
         return True
