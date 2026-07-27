@@ -50,7 +50,7 @@ def run_wizard():
     if action.startswith("Exportar"):
         output = questionary.text(
             "¿Cómo deseas llamar al archivo de respaldo?",
-            default="lutris_backup.tar.gz"
+            default="lutris_backup.tar"
         ).ask()
         
         if output:
@@ -59,7 +59,7 @@ def run_wizard():
     elif action.startswith("Importar"):
         archive = questionary.path(
             "Ingresa la ruta del archivo de respaldo a importar:",
-            default="lutris_backup.tar.gz"
+            default="lutris_backup.tar"
         ).ask()
         
         if archive:
@@ -71,11 +71,11 @@ def main():
 
     # Comando 'export'
     parser_export = subparsers.add_parser("export", help="Exporta uno o más juegos a un archivo compreso")
-    parser_export.add_argument("-o", "--output", default="lutris_backup.tar.gz", help="Nombre del archivo de salida (ej: backup.tar.gz)")
+    parser_export.add_argument("-o", "--output", default="lutris_backup.tar", help="Nombre del archivo de salida (ej: backup.tar)")
 
     # Comando 'import'
     parser_import = subparsers.add_parser("import", help="Importa juegos desde un archivo compreso")
-    parser_import.add_argument("archive", help="Ruta al archivo compreso (.tar.gz)")
+    parser_import.add_argument("archive", help="Ruta al archivo compreso (.tar)")
 
     args = parser.parse_args()
 

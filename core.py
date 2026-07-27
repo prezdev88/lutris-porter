@@ -75,7 +75,7 @@ def export_games(selected_games, output_path):
 
     console.print(f"Preparando archivo de exportación: [bold cyan]{output_path}[/bold cyan]")
     
-    with tarfile.open(output_path, "w:gz") as tar:
+    with tarfile.open(output_path, "w") as tar:
         # 1. Guardar la metadata (filas de la base de datos)
         metadata_file = "games_metadata.json"
         with open(metadata_file, "w") as f:
@@ -83,7 +83,7 @@ def export_games(selected_games, output_path):
         tar.add(metadata_file)
         os.remove(metadata_file)
         
-        with tqdm(total=total_size, unit='B', unit_scale=True, desc="Comprimiendo", leave=True) as pbar:
+        with tqdm(total=total_size, unit='B', unit_scale=True, desc="Empaquetando", leave=True) as pbar:
             for game in selected_games:
                 name = game.get('name', 'Desconocido')
                 directory = game.get('directory')
@@ -147,7 +147,7 @@ def import_games(archive_path):
     os.makedirs(base_dest_dir, exist_ok=True)
     os.makedirs(LUTRIS_CONFIG_DIR, exist_ok=True)
 
-    with tarfile.open(archive_path, "r:gz") as tar:
+    with tarfile.open(archive_path, "r") as tar:
         # Extraer y leer metadata
         try:
             metadata_member = tar.getmember("games_metadata.json")
