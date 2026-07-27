@@ -243,113 +243,103 @@ def import_games(archive_path):
     os.makedirs(base_dest_dir, exist_ok=True)
     os.makedirs(get_lutris_config_dir(), exist_ok=True)
 
+    console.print(f"[blue]Preparando motor de extracción secuencial...[/blue]")
+    total_size = os.path.getsize(archive_path)
+    metadata = None
+
     with tarfile.open(archive_path, "r") as tar:
-        # Extraer y leer metadata
-        try:
-            metadata_member = tar.getmember("games_metadata.json")
-            f = tar.extractfile(metadata_member)
-            metadata = json.load(f)
-        except KeyError:
-            console.print("[bold red]Archivo inválido: No se encontró games_metadata.json[/bold red]")
-            return
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        for game in tqdm(metadata, desc="Importando juegos"):
-            name = game.get('name', 'Desconocido')
-            original_dir = game.get('directory')
-            slug = game.get('slug')
-            config_file = game.get('configpath') or slug
-            
-            if not config_file.endswith('.yml'):
-                config_file += '.yml'
+        with tqdm(total=total_size, unit="B", unit_scale=True, desc="Extrayendo juegos") as pbar:
+            for m in tar:
+                # La barra de progreso avanza según el tamaño del archivo
+                pbar.update(m.size + 512) # Aproximación del tamaño real en el tar
                 
-            basename = os.path.basename(original_dir) if original_dir else slug
-            new_dir = os.path.join(base_dest_dir, basename)
-            
-            # Extraer archivos del juego
-            game_folder_prefix = f"games/{basename}"
-            members = [m for m in tar.getmembers() if m.name.startswith(game_folder_prefix)]
-            
-            if members:
-                # Ajustamos las rutas para extraer en el nuevo directorio
-                for m in members:
-                    # m.name es algo como "games/basename/algo"
-                    # queremos que se extraiga en "new_dir/algo"
-                    # tar.extract preserva m.name si no lo modificamos, es mejor extraer a una temp o cambiar name
-                    pass
-                
-                # Para simplificar la extracción de una subcarpeta, extraemos al directorio base_dest_dir 
-                # (ya que el prefijo es games/basename, quedará en base_dest_dir/games/basename... no,
-                # para evitar eso extraemos manualmente).
-                for m in members:
-                    rel_path = os.path.relpath(m.name, "games") # ej: basename/algo
-                    dest_path = os.path.join(base_dest_dir, rel_path)
+                if m.name == "games_metadata.json":
+                    extracted = tar.extractfile(m)
+                    if extracted:
+                        metadata = json.load(extracted)
+                    continue
                     
-                    if m.isdir():
-                        os.makedirs(dest_path, exist_ok=True)
-                    elif m.issym():
-                        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                        # Recrear el symlink en el disco
-                        if os.path.exists(dest_path) or os.path.islink(dest_path):
-                            try:
-                                os.remove(dest_path)
-                            except OSError:
-                                pass
-                        try:
-                            os.symlink(m.linkname, dest_path)
-                        except OSError:
-                            pass # Si falla (ej: permisos), ignorar
-                    elif m.isreg():
-                        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                        extracted = tar.extractfile(m)
-                        if extracted:
-                            with open(dest_path, "wb") as out_f:
-                                shutil.copyfileobj(extracted, out_f)
-            
-            # Extraer y ajustar configuración
-            config_member_name = f"configs/{config_file}"
-            try:
-                conf_m = tar.getmember(config_member_name)
-                conf_dest = os.path.join(get_lutris_config_dir(), config_file)
-                
-                with open(conf_dest, "w", encoding="utf-8") as out_f:
-                    with tar.extractfile(conf_m) as in_f:
-                        content = in_f.read().decode("utf-8")
-                        # Reemplazo de cadena básico pero efectivo
-                        if original_dir:
-                            content = content.replace(original_dir, new_dir)
-                        out_f.write(content)
-            except KeyError:
-                console.print(f"[yellow]No se encontró configuración para {name}[/yellow]")
-
-            # Actualizar base de datos
-            game['directory'] = new_dir
-            # Remover id si queremos que sea autoincremental o forzar reemplazo
-            game_id = game.pop('id', None) 
-            
-            columns = ', '.join(game.keys())
-            placeholders = ', '.join(['?'] * len(game))
-            
-            try:
-                # Si el juego ya existe por slug, lo actualizamos, si no lo insertamos
-                cursor.execute(f"SELECT id FROM games WHERE slug = ?", (slug,))
-                row = cursor.fetchone()
-                
-                if row:
-                    # Update
-                    set_clause = ', '.join([f"{k} = ?" for k in game.keys()])
-                    values = list(game.values()) + [row['id']]
-                    cursor.execute(f"UPDATE games SET {set_clause} WHERE id = ?", values)
+                if m.name.startswith("games/"):
+                    rel_path = os.path.relpath(m.name, "games")
+                    dest_path = os.path.join(base_dest_dir, rel_path)
+                elif m.name.startswith("configs/"):
+                    rel_path = os.path.relpath(m.name, "configs")
+                    dest_path = os.path.join(get_lutris_config_dir(), rel_path)
                 else:
-                    # Insert
-                    cursor.execute(f"INSERT INTO games ({columns}) VALUES ({placeholders})", tuple(game.values()))
-            except sqlite3.Error as e:
-                console.print(f"[bold red]Error guardando {name} en BD:[/bold red] {e}")
+                    continue
+                    
+                if m.isdir():
+                    os.makedirs(dest_path, exist_ok=True)
+                elif m.issym():
+                    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                    if os.path.exists(dest_path) or os.path.islink(dest_path):
+                        try:
+                            os.remove(dest_path)
+                        except OSError:
+                            pass
+                    try:
+                        os.symlink(m.linkname, dest_path)
+                    except OSError:
+                        pass
+                elif m.isreg():
+                    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                    extracted = tar.extractfile(m)
+                    if extracted:
+                        with open(dest_path, "wb") as out_f:
+                            shutil.copyfileobj(extracted, out_f)
 
-        conn.commit()
-        conn.close()
+    if not metadata:
+        console.print("[bold red]Archivo inválido: No se encontró games_metadata.json[/bold red]")
+        return
+
+    console.print("[blue]Inyectando información en la base de datos de Lutris...[/blue]")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    for game in metadata:
+        name = game.get('name', 'Desconocido')
+        original_dir = game.get('directory')
+        slug = game.get('slug')
+        basename = os.path.basename(original_dir) if original_dir else slug
+        new_dir = os.path.join(base_dest_dir, basename)
+        
+        # Ajustar configuraciones si es necesario
+        config_file = game.get('configpath') or slug
+        if not config_file.endswith('.yml'):
+            config_file += '.yml'
+            
+        conf_dest = os.path.join(get_lutris_config_dir(), config_file)
+        if os.path.exists(conf_dest) and original_dir:
+            try:
+                with open(conf_dest, "r", encoding="utf-8") as f:
+                    content = f.read()
+                content = content.replace(original_dir, new_dir)
+                with open(conf_dest, "w", encoding="utf-8") as f:
+                    f.write(content)
+            except Exception as e:
+                console.print(f"[yellow]Advertencia: No se pudo modificar el archivo de configuración para {name}: {e}[/yellow]")
+
+        # Actualizar base de datos
+        game['directory'] = new_dir
+        game_id = game.pop('id', None) 
+        
+        columns = ', '.join(game.keys())
+        placeholders = ', '.join(['?'] * len(game))
+        
+        try:
+            cursor.execute(f"SELECT id FROM games WHERE slug = ?", (slug,))
+            row = cursor.fetchone()
+            
+            if row:
+                set_clause = ', '.join([f"{k} = ?" for k in game.keys()])
+                values = list(game.values()) + [row['id']]
+                cursor.execute(f"UPDATE games SET {set_clause} WHERE id = ?", values)
+            else:
+                cursor.execute(f"INSERT INTO games ({columns}) VALUES ({placeholders})", tuple(game.values()))
+        except sqlite3.Error as e:
+            console.print(f"[bold red]Error guardando {name} en BD:[/bold red] {e}")
+
+    conn.commit()
+    conn.close()
         
     console.print("[bold green]¡Migración completada exitosamente! Abre Lutris para ver tus juegos.[/bold green]")
-    
