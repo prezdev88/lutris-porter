@@ -18,23 +18,31 @@ STD_LUTRIS_CONFIG = os.path.expanduser("~/.config/lutris/games")
 FLATPAK_LUTRIS_DB = os.path.expanduser("~/.var/app/net.lutris.Lutris/data/lutris/pga.db")
 FLATPAK_LUTRIS_CONFIG = os.path.expanduser("~/.var/app/net.lutris.Lutris/config/lutris/games")
 
-# Detección automática
-if os.path.exists(FLATPAK_LUTRIS_DB):
-    LUTRIS_DB_PATH = FLATPAK_LUTRIS_DB
-    LUTRIS_CONFIG_DIR = FLATPAK_LUTRIS_CONFIG
-else:
-    # Usamos estándar por defecto o si existe
-    LUTRIS_DB_PATH = STD_LUTRIS_DB
-    LUTRIS_CONFIG_DIR = STD_LUTRIS_CONFIG
+def detect_lutris_db():
+    if os.path.exists(FLATPAK_LUTRIS_DB):
+        return FLATPAK_LUTRIS_DB
+    if os.path.exists(STD_LUTRIS_DB):
+        return STD_LUTRIS_DB
+    return None
 
-def get_db_connection(path=LUTRIS_DB_PATH):
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"No se encontró la base de datos de Lutris en: {path}")
+def get_lutris_config_dir():
+    if os.path.exists(FLATPAK_LUTRIS_DB):
+        return FLATPAK_LUTRIS_CONFIG
+    return STD_LUTRIS_CONFIG
+
+def get_db_connection(path=None):
+    if path is None:
+        path = detect_lutris_db()
+    if not path or not os.path.exists(path):
+        # Fallback al estandar si vamos a crearla o no existe
+        path = STD_LUTRIS_DB
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"No se encontró la base de datos de Lutris en: {path}")
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     return conn
 
-def get_installed_games(db_path=LUTRIS_DB_PATH):
+def get_installed_games(db_path=None):
     try:
         conn = get_db_connection(db_path)
     except FileNotFoundError as e:
@@ -109,7 +117,7 @@ def export_games(selected_games, output_path):
         if config_file:
             if not config_file.endswith('.yml'):
                 config_file += '.yml'
-            config_path = os.path.join(LUTRIS_CONFIG_DIR, config_file)
+            config_path = os.path.join(get_lutris_config_dir(), config_file)
             if os.path.exists(config_path):
                 clean_cfg = os.path.abspath(config_path).lstrip("/")
                 cmd.extend(["--transform", f"s|^{clean_cfg}|configs/{config_file}|"])
@@ -232,7 +240,7 @@ def import_games(archive_path):
         return
         
     os.makedirs(base_dest_dir, exist_ok=True)
-    os.makedirs(LUTRIS_CONFIG_DIR, exist_ok=True)
+    os.makedirs(get_lutris_config_dir(), exist_ok=True)
 
     with tarfile.open(archive_path, "r") as tar:
         # Extraer y leer metadata
@@ -290,7 +298,7 @@ def import_games(archive_path):
             config_member_name = f"configs/{config_file}"
             try:
                 conf_m = tar.getmember(config_member_name)
-                conf_dest = os.path.join(LUTRIS_CONFIG_DIR, config_file)
+                conf_dest = os.path.join(get_lutris_config_dir(), config_file)
                 
                 with open(conf_dest, "w", encoding="utf-8") as out_f:
                     with tar.extractfile(conf_m) as in_f:
