@@ -141,14 +141,83 @@ def export_games(selected_games, output_path):
 
     console.print("\n[bold green]¡Exportación completada exitosamente a máxima velocidad![/bold green]")
 
+def install_lutris():
+    """Asistente para instalar Lutris si no está presente en el sistema."""
+    console.print("\n[bold yellow]Iniciando asistente de instalación de Lutris...[/bold yellow]")
+    
+    choices = []
+    if shutil.which("pacman"):
+        choices.append("Pacman (Arch Linux / Manjaro)")
+    if shutil.which("flatpak"):
+        choices.append("Flatpak (Universal / Steam Deck)")
+    if shutil.which("apt"):
+        choices.append("APT (Ubuntu / Debian / Mint)")
+    if shutil.which("dnf"):
+        choices.append("DNF (Fedora)")
+        
+    choices.append("Cancelar")
+    
+    if len(choices) == 1:
+        console.print("[red]No se detectó un gestor de paquetes compatible. Debes instalar Lutris manualmente.[/red]")
+        return False
+        
+    method = questionary.select(
+        "¿Qué gestor de paquetes deseas usar para instalar Lutris en este PC?",
+        choices=choices
+    ).ask()
+    
+    if method == "Cancelar" or not method:
+        return False
+        
+    try:
+        if "Pacman" in method:
+            console.print("[bold cyan]Se requerirá tu contraseña (sudo) para usar pacman...[/bold cyan]")
+            subprocess.run(["sudo", "pacman", "-S", "--noconfirm", "lutris"], check=True)
+            console.print("[yellow]Inicializando base de datos de Lutris...[/yellow]")
+            subprocess.run(["lutris", "-l"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+        elif "Flatpak" in method:
+            console.print("[bold cyan]Configurando repositorio de Flathub (si no existe)...[/bold cyan]")
+            subprocess.run(["flatpak", "remote-add", "--if-not-exists", "flathub", "https://flathub.org/repo/flathub.flatpakrepo"], check=False)
+            console.print("[bold cyan]Instalando Lutris vía Flatpak...[/bold cyan]")
+            subprocess.run(["flatpak", "install", "-y", "flathub", "net.lutris.Lutris"], check=True)
+            console.print("[yellow]Inicializando base de datos de Lutris...[/yellow]")
+            subprocess.run(["flatpak", "run", "net.lutris.Lutris", "-l"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+        elif "APT" in method:
+            console.print("[bold cyan]Se requerirá tu contraseña (sudo) para usar apt...[/bold cyan]")
+            subprocess.run(["sudo", "apt", "update"], check=True)
+            subprocess.run(["sudo", "apt", "install", "-y", "lutris"], check=True)
+            console.print("[yellow]Inicializando base de datos de Lutris...[/yellow]")
+            subprocess.run(["lutris", "-l"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+        elif "DNF" in method:
+            console.print("[bold cyan]Se requerirá tu contraseña (sudo) para usar dnf...[/bold cyan]")
+            subprocess.run(["sudo", "dnf", "install", "-y", "lutris"], check=True)
+            console.print("[yellow]Inicializando base de datos de Lutris...[/yellow]")
+            subprocess.run(["lutris", "-l"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+        console.print("[bold green]¡Lutris se instaló y configuró exitosamente![/bold green]")
+        return True
+    except subprocess.CalledProcessError:
+        console.print("[bold red]Hubo un error durante la instalación. Por favor, instálalo manualmente.[/bold red]")
+        return False
+
 def import_games(archive_path):
     if not os.path.exists(archive_path):
-        console.print(f"[bold red]Error:[/bold red] El archivo {archive_path} no existe.")
+        console.print(f"[red]El archivo de respaldo {archive_path} no existe.[/red]")
         return
-        
-    if not os.path.exists(LUTRIS_DB_PATH):
-        console.print("[bold red]Lutris no parece estar instalado en este sistema. (pga.db no encontrado)[/bold red]")
-        return
+
+    db_path = detect_lutris_db()
+    if not db_path:
+        console.print("[yellow]No se encontró una instalación de Lutris en este sistema.[/yellow]")
+        if questionary.confirm("¿Deseas que la herramienta intente instalar y configurar Lutris por ti ahora mismo?").ask():
+            if install_lutris():
+                db_path = detect_lutris_db()
+                
+        if not db_path:
+            console.print("[red]No se puede continuar sin Lutris. Abortando importación.[/red]")
+            return
 
     # 1. Preguntar por la ruta base
     default_base_dir = os.path.expanduser("~/Games")
