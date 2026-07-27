@@ -59,13 +59,25 @@ class ProgressFileReader:
     def __init__(self, file_obj, pbar):
         self.file_obj = file_obj
         self.pbar = pbar
+        self.bytes_read = 0
+        self.update_threshold = 1024 * 1024 * 5 # Actualizar UI cada 5MB
 
     def read(self, size=-1):
         chunk = self.file_obj.read(size)
-        self.pbar.update(len(chunk))
+        chunk_len = len(chunk)
+        self.bytes_read += chunk_len
+        
+        if self.bytes_read >= self.update_threshold:
+            self.pbar.update(self.bytes_read)
+            self.bytes_read = 0
+            
         return chunk
 
     def close(self):
+        # Asegurar de actualizar los bytes residuales antes de cerrar
+        if self.bytes_read > 0:
+            self.pbar.update(self.bytes_read)
+            self.bytes_read = 0
         self.file_obj.close()
 
 
@@ -89,7 +101,8 @@ def export_games(selected_games, output_path):
 
     console.print(f"Preparando archivo de exportación: [bold cyan]{output_path}[/bold cyan]")
     
-    with tarfile.open(output_path, "w") as tar:
+    # Usar bufsize grande (4MB) mejora drásticamente el rendimiento en MicroSDs (Steam Deck)
+    with tarfile.open(output_path, "w", bufsize=1024 * 1024 * 4) as tar:
         # 1. Guardar la metadata (filas de la base de datos)
         metadata_file = "games_metadata.json"
         with open(metadata_file, "w") as f:
