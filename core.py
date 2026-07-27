@@ -60,7 +60,19 @@ def export_games(selected_games, output_path):
         console.print("[yellow]No se seleccionaron juegos para exportar.[/yellow]")
         return
         
-    # Crear un archivo tar.gz
+    console.print(f"Calculando tamaño total a exportar...")
+    total_size = 0
+    
+    # Pre-calcular el tamaño para la barra de progreso
+    for game in selected_games:
+        directory = game.get('directory')
+        if directory and os.path.exists(directory):
+            for dirpath, dirnames, filenames in os.walk(directory):
+                for f in filenames:
+                    fp = os.path.join(dirpath, f)
+                    if not os.path.islink(fp):
+                        total_size += os.path.getsize(fp)
+
     console.print(f"Preparando archivo de exportación: [bold cyan]{output_path}[/bold cyan]")
     
     with tarfile.open(output_path, "w:gz") as tar:
@@ -71,29 +83,45 @@ def export_games(selected_games, output_path):
         tar.add(metadata_file)
         os.remove(metadata_file)
         
-        for game in tqdm(selected_games, desc="Comprimiendo juegos"):
-            name = game.get('name', 'Desconocido')
-            directory = game.get('directory')
-            slug = game.get('slug')
-            
-            if directory and os.path.exists(directory):
-                # Agregar el directorio del juego
-                # Lo ponemos dentro de una carpeta "games/" en el zip
-                arcname = f"games/{os.path.basename(directory)}"
-                tar.add(directory, arcname=arcname)
-            else:
-                console.print(f"[yellow]Advertencia:[/yellow] El directorio para {name} no existe ({directory})")
+        with tqdm(total=total_size, unit='B', unit_scale=True, desc="Comprimiendo", leave=True) as pbar:
+            for game in selected_games:
+                name = game.get('name', 'Desconocido')
+                directory = game.get('directory')
+                slug = game.get('slug')
+                
+                if directory and os.path.exists(directory):
+                    basename = os.path.basename(directory)
+                    # Añadir la estructura iterativamente para actualizar la barra de progreso
+                    for dirpath, dirnames, filenames in os.walk(directory):
+                        # Agregar el directorio en sí (importante para mantener permisos de carpetas vacías)
+                        rel_dir = os.path.relpath(dirpath, directory)
+                        if rel_dir == ".":
+                            tar.add(dirpath, arcname=f"games/{basename}", recursive=False)
+                        else:
+                            tar.add(dirpath, arcname=f"games/{basename}/{rel_dir}", recursive=False)
+                            
+                        # Agregar los archivos
+                        for f in filenames:
+                            fp = os.path.join(dirpath, f)
+                            arcname = f"games/{basename}/{os.path.relpath(fp, directory)}"
+                            tar.add(fp, arcname=arcname, recursive=False)
+                            
+                            # Actualizar la barra con el tamaño del archivo
+                            if not os.path.islink(fp):
+                                pbar.update(os.path.getsize(fp))
+                else:
+                    console.print(f"\n[yellow]Advertencia:[/yellow] El directorio para {name} no existe ({directory})")
 
-            # Buscar archivo de configuración
-            config_file = game.get('configpath') or slug
-            if config_file:
-                if not config_file.endswith('.yml'):
-                    config_file += '.yml'
-                config_path = os.path.join(LUTRIS_CONFIG_DIR, config_file)
-                if os.path.exists(config_path):
-                    tar.add(config_path, arcname=f"configs/{config_file}")
+                # Buscar archivo de configuración
+                config_file = game.get('configpath') or slug
+                if config_file:
+                    if not config_file.endswith('.yml'):
+                        config_file += '.yml'
+                    config_path = os.path.join(LUTRIS_CONFIG_DIR, config_file)
+                    if os.path.exists(config_path):
+                        tar.add(config_path, arcname=f"configs/{config_file}")
 
-    console.print("[bold green]¡Exportación completada exitosamente![/bold green]")
+    console.print("\n[bold green]¡Exportación completada exitosamente![/bold green]")
 
 def import_games(archive_path):
     if not os.path.exists(archive_path):
