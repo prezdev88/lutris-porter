@@ -96,11 +96,33 @@ def run_wizard():
             run_export(final_path)
             
     elif action.startswith("Importar"):
-        archive = questionary.path(
-            "Ingresa la ruta del archivo de respaldo a importar:",
-            default="lutris_backup.tar"
+        usbs = detect_usb_drives()
+        search_paths = ["."] + usbs
+        found_tars = []
+        
+        console.print("[blue]Buscando archivos de respaldo (.tar) en discos locales y externos...[/blue]")
+        for path in search_paths:
+            try:
+                for f in os.listdir(path):
+                    if f.endswith(".tar"):
+                        found_tars.append(os.path.join(path, f))
+            except Exception:
+                continue
+                
+        choices = [{"name": f"📦 {f}", "value": f} for f in found_tars]
+        choices.append({"name": "Escribir ruta manualmente...", "value": "manual"})
+        
+        archive = questionary.select(
+            "Selecciona el archivo de respaldo a importar:",
+            choices=choices
         ).ask()
         
+        if archive == "manual":
+            archive = questionary.path(
+                "Ingresa la ruta del archivo de respaldo a importar:",
+                default="lutris_backup.tar"
+            ).ask()
+            
         if archive:
             run_import(archive)
 
