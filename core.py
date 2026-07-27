@@ -287,6 +287,11 @@ def import_games(archive_path):
                     if extracted:
                         with open(dest_path, "wb") as out_f:
                             shutil.copyfileobj(extracted, out_f)
+                        # Restaurar los permisos originales (ej: ejecución para los .exe y .dll)
+                        try:
+                            os.chmod(dest_path, m.mode)
+                        except OSError:
+                            pass
 
     if not metadata:
         console.print("[bold red]Archivo inválido: No se encontró games_metadata.json[/bold red]")
