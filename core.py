@@ -10,8 +10,22 @@ import questionary
 
 console = Console()
 
-LUTRIS_DB_PATH = os.path.expanduser("~/.local/share/lutris/pga.db")
-LUTRIS_CONFIG_DIR = os.path.expanduser("~/.config/lutris/games")
+# Rutas estándar (Nativas)
+STD_LUTRIS_DB = os.path.expanduser("~/.local/share/lutris/pga.db")
+STD_LUTRIS_CONFIG = os.path.expanduser("~/.config/lutris/games")
+
+# Rutas Flatpak (Steam Deck)
+FLATPAK_LUTRIS_DB = os.path.expanduser("~/.var/app/net.lutris.Lutris/data/lutris/pga.db")
+FLATPAK_LUTRIS_CONFIG = os.path.expanduser("~/.var/app/net.lutris.Lutris/config/lutris/games")
+
+# Detección automática
+if os.path.exists(FLATPAK_LUTRIS_DB):
+    LUTRIS_DB_PATH = FLATPAK_LUTRIS_DB
+    LUTRIS_CONFIG_DIR = FLATPAK_LUTRIS_CONFIG
+else:
+    # Usamos estándar por defecto o si existe
+    LUTRIS_DB_PATH = STD_LUTRIS_DB
+    LUTRIS_CONFIG_DIR = STD_LUTRIS_CONFIG
 
 def get_db_connection(path=LUTRIS_DB_PATH):
     if not os.path.exists(path):
