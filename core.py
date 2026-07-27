@@ -55,32 +55,6 @@ def get_installed_games(db_path=LUTRIS_DB_PATH):
     finally:
         conn.close()
 
-class ProgressFileReader:
-    def __init__(self, file_obj, pbar):
-        self.file_obj = file_obj
-        self.pbar = pbar
-        self.bytes_read = 0
-        self.update_threshold = 1024 * 1024 * 5 # Actualizar UI cada 5MB
-
-    def read(self, size=-1):
-        chunk = self.file_obj.read(size)
-        chunk_len = len(chunk)
-        self.bytes_read += chunk_len
-        
-        if self.bytes_read >= self.update_threshold:
-            self.pbar.update(self.bytes_read)
-            self.bytes_read = 0
-            
-        return chunk
-
-    def close(self):
-        # Asegurar de actualizar los bytes residuales antes de cerrar
-        if self.bytes_read > 0:
-            self.pbar.update(self.bytes_read)
-            self.bytes_read = 0
-        self.file_obj.close()
-
-
 def export_games(selected_games, output_path):
     if not selected_games:
         console.print("[yellow]No se seleccionaron juegos para exportar.[/yellow]")
@@ -101,7 +75,6 @@ def export_games(selected_games, output_path):
 
     console.print(f"Preparando archivo de exportación: [bold cyan]{output_path}[/bold cyan]")
     
-    # Usar bufsize grande (4MB) mejora drásticamente el rendimiento en MicroSDs (Steam Deck)
     with tarfile.open(output_path, "w", bufsize=1024 * 1024 * 4) as tar:
         # 1. Guardar la metadata (filas de la base de datos)
         metadata_file = "games_metadata.json"
@@ -118,7 +91,6 @@ def export_games(selected_games, output_path):
                 
                 if directory and os.path.exists(directory):
                     basename = os.path.basename(directory)
-                    # Añadir la estructura iterativamente para actualizar la barra de progreso
                     for dirpath, dirnames, filenames in os.walk(directory):
                         # Agregar el directorio en sí
                         rel_dir = os.path.relpath(dirpath, directory)
@@ -127,7 +99,7 @@ def export_games(selected_games, output_path):
                         else:
                             tar.add(dirpath, arcname=f"games/{basename}/{rel_dir}", recursive=False)
                             
-                        # Agregar los archivos con tracking en tiempo real
+                        # Escritura de alta velocidad directa al descriptor del archivo
                         for f in filenames:
                             fp = os.path.join(dirpath, f)
                             arcname = f"games/{basename}/{os.path.relpath(fp, directory)}"
@@ -137,9 +109,21 @@ def export_games(selected_games, output_path):
                             else:
                                 tarinfo = tar.gettarinfo(fp, arcname=arcname)
                                 if tarinfo.isreg():
+                                    # Escribimos solo el header
+                                    tar.addfile(tarinfo)
+                                    # Y luego el contenido en chunks gigantescos de 4MB
                                     with open(fp, "rb") as f_in:
-                                        wrapped_file = ProgressFileReader(f_in, pbar)
-                                        tar.addfile(tarinfo, wrapped_file)
+                                        while True:
+                                            chunk = f_in.read(1024 * 1024 * 4) # 4MB chunk
+                                            if not chunk:
+                                                break
+                                            tar.fileobj.write(chunk)
+                                            pbar.update(len(chunk))
+                                            
+                                    # El estándar POSIX Tar requiere que los archivos se alineen a bloques de 512 bytes
+                                    remainder = tarinfo.size % 512
+                                    if remainder > 0:
+                                        tar.fileobj.write(b"\0" * (512 - remainder))
                                 else:
                                     tar.add(fp, arcname=arcname, recursive=False)
                 else:
