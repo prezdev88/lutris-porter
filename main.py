@@ -13,13 +13,20 @@ def detect_usb_drives():
     drives = []
     base_media_path = "/run/media/"
     if os.path.exists(base_media_path):
-        for user_dir in os.listdir(base_media_path):
-            user_path = os.path.join(base_media_path, user_dir)
-            if os.path.isdir(user_path):
-                for drive in os.listdir(user_path):
-                    drive_path = os.path.join(user_path, drive)
-                    if os.path.isdir(drive_path):
-                        drives.append(drive_path)
+        try:
+            for user_dir in os.listdir(base_media_path):
+                user_path = os.path.join(base_media_path, user_dir)
+                if os.path.isdir(user_path):
+                    try:
+                        for drive in os.listdir(user_path):
+                            drive_path = os.path.join(user_path, drive)
+                            if os.path.isdir(drive_path):
+                                drives.append(drive_path)
+                    except PermissionError:
+                        # Ignorar si no hay permisos (ej: /run/media/root)
+                        continue
+        except PermissionError:
+            pass
     return drives
 
 def run_export(output_file):
