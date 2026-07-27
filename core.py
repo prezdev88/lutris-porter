@@ -44,7 +44,9 @@ def get_installed_games(db_path=LUTRIS_DB_PATH):
     cursor = conn.cursor()
     # Asumiendo esquema estándar de Lutris
     try:
-        cursor.execute("SELECT * FROM games WHERE is_installed = 1 OR directory IS NOT NULL")
+        # En versiones recientes de Lutris, 'is_installed' ya no existe. 
+        # Es más seguro verificar que 'directory' tenga un valor asignado.
+        cursor.execute("SELECT * FROM games WHERE directory IS NOT NULL AND directory != ''")
         games = [dict(row) for row in cursor.fetchall()]
         return games
     except sqlite3.OperationalError as e:
