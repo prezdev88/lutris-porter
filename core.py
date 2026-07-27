@@ -289,11 +289,24 @@ def import_games(archive_path):
                     
                     if m.isdir():
                         os.makedirs(dest_path, exist_ok=True)
-                    else:
+                    elif m.issym():
                         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                        with open(dest_path, "wb") as out_f:
-                            with tar.extractfile(m) as in_f:
-                                shutil.copyfileobj(in_f, out_f)
+                        # Recrear el symlink en el disco
+                        if os.path.exists(dest_path) or os.path.islink(dest_path):
+                            try:
+                                os.remove(dest_path)
+                            except OSError:
+                                pass
+                        try:
+                            os.symlink(m.linkname, dest_path)
+                        except OSError:
+                            pass # Si falla (ej: permisos), ignorar
+                    elif m.isreg():
+                        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                        extracted = tar.extractfile(m)
+                        if extracted:
+                            with open(dest_path, "wb") as out_f:
+                                shutil.copyfileobj(extracted, out_f)
             
             # Extraer y ajustar configuración
             config_member_name = f"configs/{config_file}"
