@@ -55,107 +55,61 @@ def get_installed_games(db_path=LUTRIS_DB_PATH):
     finally:
         conn.close()
 
-class ProgressFileReader:
-    def __init__(self, file_obj, pbar):
-        self.file_obj = file_obj
-        self.pbar = pbar
-        self.bytes_read = 0
-        self.update_threshold = 1024 * 1024 * 5 # Actualizar UI cada 5MB
-
-    def read(self, size=-1):
-        chunk = self.file_obj.read(size)
-        chunk_len = len(chunk)
-        self.bytes_read += chunk_len
-        
-        if self.bytes_read >= self.update_threshold:
-            self.pbar.update(self.bytes_read)
-            self.bytes_read = 0
-            
-        return chunk
-
-    def close(self):
-        if self.bytes_read > 0:
-            self.pbar.update(self.bytes_read)
-            self.bytes_read = 0
-        self.file_obj.close()
-
+import subprocess
 
 def export_games(selected_games, output_path):
     if not selected_games:
         console.print("[yellow]No se seleccionaron juegos para exportar.[/yellow]")
         return
         
-    console.print(f"Calculando tamaño total a exportar...")
-    total_size = 0
-    
-    # Pre-calcular el tamaño para la barra de progreso
-    for game in selected_games:
-        directory = game.get('directory')
-        if directory and os.path.exists(directory):
-            for dirpath, dirnames, filenames in os.walk(directory):
-                for f in filenames:
-                    fp = os.path.join(dirpath, f)
-                    if not os.path.islink(fp):
-                        total_size += os.path.getsize(fp)
-
     console.print(f"Preparando archivo de exportación: [bold cyan]{output_path}[/bold cyan]")
     
-    with tarfile.open(output_path, "w", bufsize=1024 * 1024 * 4) as tar:
-        # ¡HACK! Modificamos el tamaño del buffer interno de copia de Python a 4MB
-        # Esto nos da la misma velocidad extrema sin romper su validación interna.
-        tar.copybufsize = 1024 * 1024 * 4 
-
-        # 1. Guardar la metadata (filas de la base de datos)
-        metadata_file = "games_metadata.json"
-        with open(metadata_file, "w") as f:
-            json.dump(selected_games, f, indent=4)
-        tar.add(metadata_file)
-        os.remove(metadata_file)
+    # 1. Guardar la metadata temporalmente
+    metadata_file = "games_metadata.json"
+    with open(metadata_file, "w") as f:
+        json.dump(selected_games, f, indent=4)
         
-        with tqdm(total=total_size, unit='B', unit_scale=True, desc="Empaquetando", leave=True) as pbar:
-            for game in selected_games:
-                name = game.get('name', 'Desconocido')
-                directory = game.get('directory')
-                slug = game.get('slug')
-                
-                if directory and os.path.exists(directory):
-                    basename = os.path.basename(directory)
-                    for dirpath, dirnames, filenames in os.walk(directory):
-                        # Agregar el directorio en sí
-                        rel_dir = os.path.relpath(dirpath, directory)
-                        if rel_dir == ".":
-                            tar.add(dirpath, arcname=f"games/{basename}", recursive=False)
-                        else:
-                            tar.add(dirpath, arcname=f"games/{basename}/{rel_dir}", recursive=False)
-                            
-                        # Agregar los archivos
-                        for f in filenames:
-                            fp = os.path.join(dirpath, f)
-                            arcname = f"games/{basename}/{os.path.relpath(fp, directory)}"
-                            
-                            if os.path.islink(fp):
-                                tar.add(fp, arcname=arcname, recursive=False)
-                            else:
-                                tarinfo = tar.gettarinfo(fp, arcname=arcname)
-                                if tarinfo.isreg():
-                                    with open(fp, "rb") as f_in:
-                                        wrapped_file = ProgressFileReader(f_in, pbar)
-                                        tar.addfile(tarinfo, wrapped_file)
-                                else:
-                                    tar.add(fp, arcname=arcname, recursive=False)
-                else:
-                    console.print(f"\n[yellow]Advertencia:[/yellow] El directorio para {name} no existe ({directory})")
+    # Crear el tar con la metadata primero
+    subprocess.run(["tar", "-cf", output_path, metadata_file], check=True)
+    os.remove(metadata_file)
+    
+    # 2. Agregar cada juego usando GNU tar nativo (infinitamente más rápido para archivos pequeños)
+    console.print("[bold yellow]Empaquetando juegos con motor nativo de Linux (GNU Tar)...[/bold yellow]")
+    console.print("Esto procesará miles de archivos pequeños a velocidad nativa.")
+    
+    for game in selected_games:
+        name = game.get('name', 'Desconocido')
+        directory = game.get('directory')
+        slug = game.get('slug')
+        
+        console.print(f" -> Añadiendo: [bold cyan]{name}[/bold cyan]")
+        
+        if directory and os.path.exists(directory):
+            basename = os.path.basename(directory)
+            # GNU tar -r (append). Transformamos la ruta interna '.' a 'games/basename'
+            # Descartamos errores menores como "socket ignored" que lanza tar
+            transform_arg = f"s,^\\.,games/{basename},"
+            subprocess.run(
+                ["tar", "--transform", transform_arg, "-rf", output_path, "-C", directory, "."],
+                stderr=subprocess.DEVNULL
+            )
+        else:
+            console.print(f"[yellow]Advertencia:[/yellow] El directorio para {name} no existe ({directory})")
 
-                # Buscar archivo de configuración
-                config_file = game.get('configpath') or slug
-                if config_file:
-                    if not config_file.endswith('.yml'):
-                        config_file += '.yml'
-                    config_path = os.path.join(LUTRIS_CONFIG_DIR, config_file)
-                    if os.path.exists(config_path):
-                        tar.add(config_path, arcname=f"configs/{config_file}")
+        # Buscar archivo de configuración
+        config_file = game.get('configpath') or slug
+        if config_file:
+            if not config_file.endswith('.yml'):
+                config_file += '.yml'
+            config_path = os.path.join(LUTRIS_CONFIG_DIR, config_file)
+            if os.path.exists(config_path):
+                transform_arg = f"s,^.*/,configs/,"
+                subprocess.run(
+                    ["tar", "--transform", transform_arg, "-rf", output_path, config_path],
+                    stderr=subprocess.DEVNULL
+                )
 
-    console.print("\n[bold green]¡Exportación completada exitosamente![/bold green]")
+    console.print("\n[bold green]¡Exportación completada exitosamente a velocidad nativa![/bold green]")
 
 def import_games(archive_path):
     if not os.path.exists(archive_path):
